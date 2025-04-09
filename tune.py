@@ -49,7 +49,7 @@ def main():
 
 # --- 4. Define the wandb sweep configuration ---
 sweep_configuration = {
-    'name': 'random with corrected stdp',
+    'name': 'bayes with refractored and learning rule',
     "method": "bayes",  # or "random" if you prefer random search first
     "metric": {"goal": "maximize", "name": "accuracy"},
     "parameters": {
@@ -87,7 +87,7 @@ sweep_configuration = {
         },
         
         # Refractory period in discrete steps
-        "refrac": {
+        "refractory_period": {
             "values": [5, 7, 9, 11, 13]
         },
         
