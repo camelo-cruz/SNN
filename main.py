@@ -1,223 +1,236 @@
-import pickle
-import wandb
-import torch
 import os
-from tqdm import tqdm
+import pickle
+import torch
 import numpy as np
-from Network import Network
+import wandb
+from tqdm import tqdm
+from sklearn.metrics import confusion_matrix, classification_report
 import matplotlib.pyplot as plt
-import seaborn as sns 
-from sklearn.metrics import confusion_matrix, precision_recall_fscore_support, classification_report
+import seaborn as sns
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
 
 def save_network(network, filename="network.pkl"):
-        with open(filename, 'wb') as f:
-            pickle.dump(network, f)
-        print(f"Network saved to {filename}")
+    """
+    Save the entire network object to a pickle file.
+
+    Args:
+        network: The network object to be saved.
+        filename (str): The file path for saving the network.
+    """
+    with open(filename, 'wb') as f:
+        pickle.dump(network, f)
+    print(f"Network saved to {filename}")
+
 
 def load_network(filename):
-        """
-        Load the entire network object from a file.
+    """
+    Load the entire network object from a pickle file.
 
-        Args:
-            filename (str): Path to load the network from.
-        
-        Returns:
-            Network: The loaded spiking neural network instance.
-        """
-        with open(filename, 'rb') as f:
-            network = pickle.load(f)
-        print(f"Network loaded from {filename}")
+    Args:
+        filename (str): Path to the file from which the network will be loaded.
+    
+    Returns:
+        The loaded network object.
+    """
+    with open(filename, 'rb') as f:
+        network = pickle.load(f)
+    print(f"Network loaded from {filename}")
+    return network
 
-        return network
 
 def train(network, train_loader, report_interval, num_epochs=1):
-        # Enable network learning
-        network.learning = True
-        print({"Training Configuration": network})
-        print('network learning: ', network.learning, flush=True)
-        initial_weights = network.synapse_input_hidden.w.clone()
+    """
+    Train the network using the provided training DataLoader.
 
-        for epoch in range(num_epochs):
-            print(f"\nStarting Epoch {epoch+1}/{num_epochs}\n", flush=True)
-            epoch_initial_weights = network.synapse_input_hidden.w.clone()
+    Args:
+        network: The spiking neural network instance.
+        train_loader (DataLoader): DataLoader for training data.
+        report_interval (int): Interval (in samples) at which progress is reported.
+        num_epochs (int): Number of epochs for training.
+    """
+    # Enable learning mode and report the current configuration.
+    network.learning = True
+    print({"Training Configuration": network})
+    print("Network learning:", network.learning, flush=True)
 
-            #start training loop
-            for idx, (image, label) in tqdm(enumerate(train_loader), desc='training', total=len(train_loader)):
-                # Forward pass through the network
-                outs = network.forward(image)
-                # Report at intervals
-                if idx % report_interval == 0:
-                    max_spike_indices = torch.where(outs == outs.max())[0]
-                    print(f"Sample {idx} - Label: {label} - Output Spikes: {outs} - Most spiked = {max_spike_indices}", flush=True)
-                    print("Learned thetas: ", network.hidden_layer.theta, flush=True)
-        
-        print("Learned thetas: ", network.hidden_layer.theta, flush=True)
+    # Record initial synaptic weights.
+    initial_weights = network.synapse_input_hidden.w.clone()
+
+    for epoch in range(num_epochs):
+        print(f"\nStarting Epoch {epoch + 1}/{num_epochs}\n", flush=True)
+        epoch_initial_weights = network.synapse_input_hidden.w.clone()
+
+        # Training loop over batches.
+        for idx, (image, label) in tqdm(enumerate(train_loader),
+                                          desc='Training',
+                                          total=len(train_loader)):
+            # Forward pass through the network.
+            outs = network.forward(image)
+
+            # Report progress at specified intervals.
+            if idx % report_interval == 0:
+                max_spike_indices = torch.where(outs == outs.max())[0]
+                print(f"Sample {idx} - Label: {label} - Output Spikes: {outs} - Most spiked: {max_spike_indices}",
+                      flush=True)
+                print("Learned thetas:", network.hidden_layer.theta, flush=True)
+
+        print("Learned thetas after epoch:", network.hidden_layer.theta, flush=True)
         last_weights = network.synapse_input_hidden.w.clone()
 
-        print('weights changed: ', torch.all(torch.eq(initial_weights, last_weights)).item() == 0, flush=True)
-        save_network(network, filename="not_assigned_network.pkl")
+        # Check and report if synaptic weights have changed.
+        weights_changed = not torch.all(torch.eq(initial_weights, last_weights)).item()
+        print("Weights changed:", weights_changed, flush=True)
+
+    # Save network after training.
+    save_network(network, filename="not_assigned_network.pkl")
 
 
 def assign_neuron_class_mapping(network, train_loader, report_interval):
     """
-    Assigns each neuron in the hidden layer of the network to a class based on cumulative spike responses.
-    
-    The function processes the training dataset (using batch size 1 for compatibility) and accumulates
-    the output spikes of each neuron for every class label. It then computes the probability distribution
-    of spikes per neuron and assigns each neuron the class label for which it fired most consistently.
-    
+    Assign each hidden neuron a class based on its cumulative spike response.
+
+    The function runs through the training set (batch size 1) and accumulates spike counts per class.
+    Then, it computes the per-neuron probability distributions and assigns each neuron the label 
+    for which it fires most consistently.
+
     Args:
-        network (Network): The spiking neural network instance.
-        train_loader (DataLoader): The training data loader.
-        report_interval (int): Interval at which to report progress.
-    
-    Side Effects:
-        Updates network.neuron_class_mapping with a dictionary mapping neuron indices to class labels.
-        Saves the updated network using the save_network() function.
+        network: The spiking neural network instance.
+        train_loader (DataLoader): DataLoader containing training samples.
+        report_interval (int): Interval at which progress is printed.
     """
-    # Disable learning for evaluation and ensure no gradient tracking
+    # Disable learning to ensure a fixed evaluation environment.
     network.learning = False
     print("Network learning disabled:", network.learning, flush=True)
-    print("Received theta values:", network.hidden_layer.theta, flush=True)
+    print("Initial theta values:", network.hidden_layer.theta, flush=True)
 
-    # Save the initial T value for later resetting
+    # Save initial simulation time and synapse weights.
     initial_T = network.T
-
-    # Clone initial synapse weights for reference
     initial_weights = network.synapse_input_hidden.w.clone()
 
-    # Get unique, sorted class labels from training data
+    # Extract sorted unique class labels from the training dataset.
     unique_labels = sorted(torch.unique(torch.tensor(train_loader.dataset.targets)).tolist())
     print("Unique labels:", unique_labels, flush=True)
 
-    # Initialize cumulative spikes for each class (each is a tensor of zeros with length = hidden layer size)
-    cumulative_spikes = {
-        label: torch.zeros(network.hidden_size, device=network.device) for label in unique_labels
-    }
+    # Dictionary for accumulating spikes per class.
+    cumulative_spikes = {label: torch.zeros(network.hidden_size, device=network.device)
+                         for label in unique_labels}
 
-    # Use no_grad to disable gradient computation during evaluation
     with torch.no_grad():
-        # Accumulate spikes per neuron for each class across the training set
-        for idx, (image, label) in tqdm(enumerate(train_loader), desc='Assigning neurons to classes', total=len(train_loader)):
-            label = label.item()
+        for idx, (image, label) in tqdm(enumerate(train_loader),
+                                          desc='Assigning neurons to classes',
+                                          total=len(train_loader)):
+            label_val = label.item()
 
-            # First forward pass using the initial T value; result is a tensor
-            outs = network.forward(image).flatten()  # stays on network.device
-            max_val = torch.max(outs)
-            max_indices = torch.where(outs == max_val)[0]
+            # Run the forward pass with the current T.
+            outs = network.forward(image).flatten()
+            max_indices = torch.where(outs == outs.max())[0]
 
-            # Check if the maximum spike is unique; if not, try resolving ties by increasing T
+            # If there is ambiguity (tie), increase T in increments until a unique winner is found.
             if len(max_indices) != 1:
                 for iteration in range(5):
                     network.T += 5
                     outs_new = network.forward(image).flatten()
-                    max_val_new = torch.max(outs_new)
-                    max_indices_new = torch.where(outs_new == max_val_new)[0]
+                    max_indices_new = torch.where(outs_new == outs_new.max())[0]
                     if len(max_indices_new) == 1 or iteration == 4:
-                        outs = outs_new  # Use the output from this iteration (unique or final iteration)
-                        max_val = max_val_new
-                        max_indices = max_indices_new
+                        outs, max_indices = outs_new, max_indices_new
                         break
 
-            # Accumulate only the spike output from the chosen run.
-            cumulative_spikes[label] += outs
+            # Accumulate spikes for the given class label.
+            cumulative_spikes[label_val] += outs
 
-            # Reset T to its initial value after processing the sample
+            # Reset simulation time T.
             network.T = initial_T
 
             if idx % report_interval == 0:
-                max_spike_indices = torch.where(outs == torch.max(outs))[0]
-                # Print outs by moving them to CPU for a clear display
-                print(f"Sample {idx} - Label: {label} - Outputs: {outs.cpu().numpy()} - Most spiked indices: {max_spike_indices.cpu().numpy()}", flush=True)
+                print(f"Sample {idx} - Label: {label_val} - Outputs: {outs.cpu().numpy()} - "
+                      f"Most spiked indices: {max_indices.cpu().numpy()}", flush=True)
                 print("Theta values:", network.hidden_layer.theta, flush=True)
 
-    # Compute per-label spike probabilities for each neuron
+    # Compute per-class spike probabilities for each neuron.
     probabilities = {}
     for label, spikes in cumulative_spikes.items():
         total_spikes = spikes.sum().item()
-        if total_spikes > 0:  # Avoid division by zero
+        if total_spikes > 0:
             probabilities[label] = (spikes / total_spikes).tolist()
         else:
             probabilities[label] = [0] * network.hidden_size
 
-    # Build a mapping: for each neuron, compile a list of probabilities for each label (in sorted order)
+    # Build probability list per neuron.
     neuron_probs = {
         neuron_idx: [probabilities[label][neuron_idx] for label in unique_labels]
         for neuron_idx in range(network.hidden_size)
     }
     print("Neuron probabilities per class:", neuron_probs, flush=True)
 
-    # Determine class assignment for each neuron based on maximum probability
+    # Assign each neuron to the class with the highest probability.
     network.neuron_class_mapping = {}
     for neuron_idx, probs in neuron_probs.items():
         max_index, _ = max(enumerate(probs), key=lambda x: x[1])
         assigned_label = unique_labels[max_index]
         network.neuron_class_mapping[neuron_idx] = assigned_label
 
-    # Report mapping for each neuron
+    # Report the final mapping.
     for neuron_idx, assigned_label in network.neuron_class_mapping.items():
         print(f"Neuron {neuron_idx} is assigned to class {assigned_label}", flush=True)
 
-    # Check if weights have changed during this process
+    # Check whether synaptic weights changed during the mapping process.
     last_weights = network.synapse_input_hidden.w.clone()
     weights_changed = not torch.all(torch.eq(initial_weights, last_weights)).item()
     print("Weights changed during assignment:", weights_changed, flush=True)
-
     print("Final neuron class mapping:", network.neuron_class_mapping, flush=True)
-    save_network(network, filename="assigned_network.pkl")
 
+    # Save the updated network.
+    save_network(network, filename="assigned_network.pkl")
 
 
 def test(network, test_loader, report_interval):
     """
-    Evaluate the network on the test dataset.
+    Evaluate the network on test data and report classification accuracy,
+    a confusion matrix, and a classification report.
 
-    This function performs inference on each sample in the test dataset, attempts to 
-    resolve ambiguous outputs by increasing the simulation time T if necessary, and 
-    computes the overall accuracy. It also plots and saves a confusion matrix.
+    The function resolves ambiguous outputs by increasing T if necessary.
 
     Args:
-        network (Network): The spiking neural network instance.
-        test_loader (DataLoader): DataLoader for the test dataset.
+        network: The spiking neural network instance.
+        test_loader (DataLoader): DataLoader containing test samples.
         report_interval (int): Interval at which progress is printed.
 
     Returns:
-        float: The accuracy of the network on the test dataset.
+        float: Classification accuracy.
     """
-    # Set network to evaluation mode and store the initial simulation time
     network.learning = False
     initial_T = network.T
     print({"Testing Configuration": network})
     print("Network learning:", network.learning, flush=True)
     print("Hidden layer theta:", network.hidden_layer.theta, flush=True)
 
-    # Retrieve unique class labels from test targets and move them to the device
+    # Get the unique class labels from the test targets.
     unique_labels = torch.tensor(test_loader.dataset.targets).unique().to(network.device)
 
     correct = 0
     total = 0
     y_true, y_pred = [], []
 
-    # Use no_grad to save memory (even if gradients are not computed)
     with torch.no_grad():
-        for idx, (image, label) in tqdm(enumerate(test_loader), desc='Testing', total=len(test_loader)):
-            label_idx = label.item()
+        for idx, (image, label) in tqdm(enumerate(test_loader),
+                                          desc='Testing',
+                                          total=len(test_loader)):
+            label_val = label.item()
             predicted = None
 
-            # First forward pass using the initial T value
+            # Forward pass with the initial T.
             outs = network.forward(image).flatten().cpu().numpy()
             max_val = np.max(outs)
             max_indices = np.where(outs == max_val)[0]
 
-            # Check if the maximum spike is unique
+            # If only one neuron is most active, use its mapping.
             if len(max_indices) == 1:
                 predicted = network.neuron_class_mapping[max_indices[0]]
                 unique = True
             else:
                 unique = False
-                # Try increasing T in fixed increments to resolve ties
+                # Attempt to resolve ties by increasing T.
                 for iteration in range(5):
                     network.T += 5
                     outs = network.forward(image).flatten().cpu().numpy()
@@ -228,47 +241,48 @@ def test(network, test_loader, report_interval):
                         unique = True
                         break
 
-            # Fallback if a unique maximum is not found
+            # Fallback in case of continued ambiguity.
             if not unique and predicted is None:
                 predicted = network.neuron_class_mapping[max_indices[0]]
 
-            # Reset T to its initial value after processing the sample
+            # Reset T to the initial value.
             network.T = initial_T
 
-            y_true.append(label_idx)
+            y_true.append(label_val)
             y_pred.append(predicted)
 
-            if predicted == label_idx:
+            if predicted == label_val:
                 correct += 1
             total += 1
 
             if idx % report_interval == 0:
-                print(f"Sample {idx} - Label: {label_idx} - Output Spike Counts: {outs}")
+                print(f"Sample {idx} - Label: {label_val} - Output Spike Counts: {outs}")
                 print("Theta values:", network.hidden_layer.theta, flush=True)
-                print(f"Predicted: {predicted}, Actual: {label_idx}")
+                print(f"Predicted: {predicted}, Actual: {label_val}", flush=True)
 
     accuracy = correct / total
     print(f"Accuracy: {accuracy:.2%}", flush=True)
 
-    # Generate and print the confusion matrix
+    # Generate and display the confusion matrix.
     labels = unique_labels.tolist()
     conf_matrix = confusion_matrix(y_true, y_pred, labels=labels)
     print("Confusion Matrix:\n", conf_matrix, flush=True)
 
-    # Save the confusion matrix plot
     os.makedirs('plots/train_test', exist_ok=True)
     plt.figure(figsize=(10, 8))
-    sns.heatmap(conf_matrix, annot=True, fmt='d', cmap='Blues', xticklabels=labels, yticklabels=labels)
+    sns.heatmap(conf_matrix, annot=True, fmt='d', cmap='Blues',
+                xticklabels=labels, yticklabels=labels)
     plt.xlabel('Predicted Label')
     plt.ylabel('True Label')
     plt.title('Confusion Matrix')
     plt.savefig('plots/train_test/confusion_matrix.png')
-    print("Confusion Matrix saved to plots/train_test/confusion_matrix.png")
+    print("Confusion Matrix saved to plots/train_test/confusion_matrix.png", flush=True)
 
     print("\nClassification Report:")
     print(classification_report(y_true, y_pred, labels=labels, zero_division=0))
 
     return accuracy
+
 
 
 def main():
