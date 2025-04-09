@@ -97,10 +97,10 @@ class Synapse:
         self.post_trace += post_spiked
 
         # Long-Term Potentiation (LTP): Increase weight when postsynaptic spike occurs.
-        delta_w_LTP = self.A_plus * self.pre_trace.unsqueeze(1) * post_spiked.unsqueeze(0)
+        delta_w_LTP = self.A_plus * self.pre_trace.unsqueeze(1) * post_spiked.unsqueeze(0) * (self.max_w - self.w)
 
         # Long-Term Depression (LTD): Decrease weight when presynaptic spike occurs.
-        delta_w_LTD = self.A_minus * pre_spiked.unsqueeze(1) * self.post_trace.unsqueeze(0)
+        delta_w_LTD = self.A_minus * pre_spiked.unsqueeze(1) * self.post_trace.unsqueeze(0) * (self.w - self.min_w)
 
         # Update synaptic weights.
         self.w += (delta_w_LTP - delta_w_LTD)
