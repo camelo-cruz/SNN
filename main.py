@@ -50,9 +50,11 @@ def train(network, train_loader, report_interval, num_epochs=1):
         num_epochs (int): Number of epochs for training.
     """
     # Enable learning mode and report the current configuration.
-    network.learning = True
+    network.stdp = True
+    network.homeostasis = True
     print({"Training Configuration": network})
-    print("Network learning:", network.learning, flush=True)
+    print("Network stdp:", network.stdp, flush=True)
+    print("Network homeostasis:", network.homeostasis, flush=True)
 
     # Record initial synaptic weights.
     initial_weights = network.synapse_input_hidden.w.clone()
@@ -100,9 +102,11 @@ def assign_neuron_class_mapping(network, train_loader, report_interval):
         report_interval (int): Interval at which progress is printed.
     """
     # Disable learning to ensure a fixed evaluation environment.
-    network.learning = False
-    print("Network learning disabled:", network.learning, flush=True)
-    print("Initial theta values:", network.hidden_layer.theta, flush=True)
+    network.stdp = False
+    network.homeostasis = False
+    print({"Training Configuration": network})
+    print("Network stdp:", network.stdp, flush=True)
+    print("Network homeostasis:", network.homeostasis, flush=True)
 
     # Save initial simulation time and synapse weights.
     initial_T = network.T
@@ -199,10 +203,12 @@ def test(network, test_loader, report_interval):
     Returns:
         float: Classification accuracy.
     """
-    network.learning = False
+    network.stdp = False
+    network.homeostasis = False
+    print({"Training Configuration": network})
+    print("Network stdp:", network.stdp, flush=True)
+    print("Network homeostasis:", network.homeostasis, flush=True)
     initial_T = network.T
-    print({"Testing Configuration": network})
-    print("Network learning:", network.learning, flush=True)
     print("Hidden layer theta:", network.hidden_layer.theta, flush=True)
 
     # Get the unique class labels from the test targets.

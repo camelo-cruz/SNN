@@ -38,15 +38,13 @@ class Synapse:
         self.device = device
         self.record_history = record_history
 
-        # Initialize synaptic weights: normally distributed around the mean of min and max, then clamped.
-        mean_w = (max_w + min_w) / 2
         self.w = torch.normal(
-            mean=mean_w,
+            mean=0.0,
             std=0.1,
             size=(pre_neuron.batch_size, post_neuron.batch_size),
             device=device
         )
-        self.w = torch.clamp(self.w, min_w, max_w)
+        print(f"Initialized synaptic weights: {self.w}", flush=True)
 
         # Record initial weight if history recording is enabled.
         self.w_history = [self.w.clone()] if record_history else None

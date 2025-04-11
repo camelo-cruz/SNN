@@ -49,83 +49,83 @@ def main():
 
 # --- 4. Define the wandb sweep configuration ---
 sweep_configuration = {
-    'name': 'bayes with refractored and learning rule',
-    "method": "bayes",  # or "random" if you prefer random search first
-    "metric": {"goal": "maximize", "name": "accuracy"},
-    "parameters": {
-        "T": {"value": 100},
-        "hidden_size": {"values": [200, 500, 1000]},
-        
-        # Tau (membrane time constant) in fairly spaced discrete steps:
-        "tau": {
-            "values": [30, 50, 70, 100, 130]
-        },
-        
-        # Membrane resistance
-        "R": {
-            "min": 0.4,
-            "max": 1.0
-        },
-        
-        # Scale factor for weights (if relevant)
-        "scale": {"value": 1},
-        
-        # Simulation timestep
-        "dt": {"value": 1},
-        
-        # Resting potential range
-        "V_rest": {
-            "min": 0.2,
-            "max": 0.8
-        },
-        
-        # Baseline threshold
-        "theta": {
-            "min": 2,
-            "max": 8,
-            "distribution": "int_uniform"
-        },
-        
-        # Refractory period in discrete steps
-        "refractory_period": {
-            "values": [5, 7, 9, 11, 13]
-        },
-        
-        # Adaptation time constant of threshold
-        "tau_theta": {
-            "values": [30, 50, 70, 100]
-        },
-        
-        # Threshold increment upon spike
-        "theta_increment": {
-            "values": [10, 20, 30, 50]
-        },
-        
-        # STDP LTP magnitude
-        "A_plus": {
-            "min": 1e-5,
-            "max": 5e-5
-        },
-        
-        # Ratio that determines how A_minus is set relative to A_plus
-        "A_ratio": {
-            "min": 1.0,
-            "max": 1.5
-        },
-        
-        # STDP time constant (decay of pre/post traces)
-        "tau_stdp": {
-            "values": [30, 50, 70, 100]
-        },
-        
-        # Weight bounds
-        "max_w": {"value": 255},
-        "min_w": {"value": 0},
-        
-        # Device
-        "device": {"value": "cpu"},
-    },
-}
+     'name': 'bayes with different weight initialization no clamping',
+     "method": "bayes",  # or "random" if you prefer random search first
+     "metric": {"goal": "maximize", "name": "accuracy"},
+     "parameters": {
+         "T": {"value": 50},
+         "hidden_size": {"values": [100, 200, 300, 400, 500]},
+         
+         # Tau (membrane time constant) in fairly spaced discrete steps:
+         "tau": {
+             "values": [30, 40, 50, 70, 100, 130, 150, 200]
+         },
+         
+         # Membrane resistance
+         "R": {
+             "min": 0.1,
+             "max": 1.0
+         },
+         
+         # Scale factor for weights (if relevant)
+         "scale": {"values": [3, 5, 7, 10]},
+         
+         # Simulation timestep
+         "dt": {"value": 1},
+         
+         # Resting potential range
+         "V_rest": {
+             "min": 0.1,
+             "max": 1.0
+         },
+         
+         # Baseline threshold
+         "theta": {
+             "min": 1,
+             "max": 10,
+             "distribution": "int_uniform"
+         },
+         
+         # Refractory period in discrete steps
+         "refractory_period": {
+             "values": [3, 5, 7, 9, 11, 13, 15, 20]
+         },
+         
+         # Adaptation time constant of threshold
+         "tau_theta": {
+             "values": [10, 20, 30, 50, 70, 100, 130, 150, 200]
+         },
+         
+         # Threshold increment upon spike
+         "theta_increment": {
+             "values": [10, 15, 20, 30, 40, 50, 60, 70, 100, 200]
+         },
+         
+         # STDP LTP magnitude
+         "A_plus": {
+             "min": 1e-6,
+             "max": 1e-4
+         },
+         
+         # Ratio that determines how A_minus is set relative to A_plus
+         "A_ratio": {
+             "min": 1.0,
+             "max": 2.0
+         },
+         
+         # STDP time constant (decay of pre/post traces)
+         "tau_stdp": {
+             "values": [10, 20, 30, 50, 70, 100, 130, 150, 200]
+         },
+         
+         # Weight bounds
+         "max_w": {"value": 255},
+         "min_w": {"value": 0},
+         
+         # Device
+         "device": {"value": "cpu"},
+     },
+ }
 
 # --- 5. Initialize the sweep and run the wandb agent ---
 wandb.login()

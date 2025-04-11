@@ -34,6 +34,7 @@ class Network:
                  A_plus=0.005,
                  A_minus=0.005,
                  tau_stdp=20,
+                 record_history=False,
                  plot=False,
                  device='cpu'):
         """
@@ -83,7 +84,7 @@ class Network:
         self.min_w = min_w
 
         # Recording and device settings
-        self.record_history = plot
+        self.record_history = record_history
         self.plot = plot
         self.device = device
 
@@ -96,20 +97,29 @@ class Network:
         self.create_synapses()
 
         # Internal flag controlling learning updates
-        self._learning = False
+        self._stdp = False
+        self._homeostasis = False
 
     @property
-    def learning(self):
+    def stdp(self):
         """Flag indicating whether learning (STDP updates) is active."""
-        return self._learning
+        return self._stdp
+    
+    @property
+    def homeostasis(self):
+        """Flag indicating whether learning (STDP updates) is active."""
+        return self._homeostasis
 
-    @learning.setter
-    def learning(self, value):
-        self._learning = value
-        # Update the homeostasis setting of the hidden neurons.
+    @stdp.setter
+    def stdp(self, value):
+        self._stdp = value
+        print(f"stdp activated: {value}")
+    
+    @homeostasis.setter
+    def homeostasis(self, value):
+        self._homeostasis = value
         self.hidden_layer.homeostasis = value
-        print(f"Learning: {value}")
-        print(f"Homeostasis: {self.hidden_layer.homeostasis}")
+        print(f"Homeostasis activated: {self.hidden_layer.homeostasis}")
 
     def __repr__(self):
         return (
@@ -118,6 +128,7 @@ class Network:
             f"refrac={self.refractory_period}, tau_theta={self.tau_theta}, theta_increment={self.theta_increment}, "
             f"A_plus={self.A_plus}, A_minus={self.A_minus}, tau_stdp={self.tau_stdp}, "
             f"max_w={self.max_w}, min_w={self.min_w}, record_history={self.record_history}, device='{self.device}')"
+            f"stdp={self.stdp}, homeostasis={self.homeostasis}"
         )
 
     def clear_neurons(self):
@@ -195,7 +206,7 @@ class Network:
             count_spikes += self.hidden_layer.spiked  # Accumulate spikes.
 
             # Apply STDP updates if learning is enabled.
-            if self.learning:
+            if self.stdp:
                 self.synapse_input_hidden.update_stdp()
 
         if self.plot:
@@ -224,7 +235,8 @@ def network_simulation():
 
     # Initialize network with a small input and hidden layer for demonstration.
     net = Network(T=T, input_size=2, hidden_size=2, scale=1, plot=True, device='cpu')
-    net.learning = True
+    net.homeostasis = True
+    net.stdp = True
 
     outputs = net.forward(image)
     print("Output Spike Counts:", outputs)
