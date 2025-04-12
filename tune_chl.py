@@ -26,8 +26,11 @@ test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False)
 def objective(config):
     # Convert wandb.config to a regular dictionary
     params = dict(config)
-    
+    homeostasis = params['homeostasis']
+    del params['homeostasis']
     net = ContrastiveNetwork(**params)
+    net.homeostasis = homeostasis
+    
     epochs = 1
 
     initial_w = net.synapse_input_hidden.w.clone()
@@ -81,53 +84,63 @@ def main():
 
 # --- 4. Define the wandb sweep configuration ---
 sweep_configuration = {
-    'name': 'bayes for CHL',
+    "name": 'bayes for CHL',
     "method": "bayes",  # or "random" if you prefer random search first
+    "notes" : "trying biological parameters",
     "metric": {"goal": "maximize", "name": "accuracy"},
     "parameters": {
          "lr": {
             "distribution": "log_uniform_values", 
-            "min": 1e-4, 
+            "min": 1e-7, 
             "max": 1e-2},
 
-        "T": {"values": [50, 80, 100, 150]},
+        "T": {"values": [80, 100, 150]},
 
         "hidden_size": {"value": 10},
          
         # Tau (membrane time constant) in fairly spaced discrete steps:
         "tau": {
-            "values": [30, 40, 50, 70, 100, 130, 150, 200]
+            "values": [30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 200]
         },
          
         # Membrane resistance
         "R": {
-            "min": 0.1,
-            "max": 1.0
+            "value": 1.0,
         },
          
         # Scale factor for weights (if relevant)
-        "scale": {"values": [1, 3, 5, 7, 10]},
+        "scale": {"values": [3, 5, 7, 10, 15]},
          
         # Simulation timestep
         "dt": {"value": 1},
          
         # Resting potential range
         "V_rest": {
-            "min": 0.1,
-            "max": 1.0
+            "value": 0.0,
         },
          
         # Baseline threshold
         "theta": {
-            "min": 1,
-            "max": 10,
-            "distribution": "int_uniform"
+            "value": 1.0,
         },
          
         # Refractory period in discrete steps
         "refractory_period": {
-            "values": [3, 5, 7, 9, 11, 13, 15, 20]
+            "values": [3, 5, 7, 9, 11, 13, 15, 20, 25, 30, 35, 40, 50]
         },
+
+        "homeostasis": {
+            "value": False,
+        },
+
+        #"tau_theta": {
+        #    "values": [30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 200]
+        #},
+
+        #"theta_increment": {
+        #    "values": [1.0, 3.0, 5.0, 10.0, 15.0, 20.0, 30.0]
+        #},
+        
          
         # Device
         "device": {"value": "cpu"},

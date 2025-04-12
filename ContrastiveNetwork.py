@@ -6,6 +6,7 @@
 #  - tau=30
 
 import os
+import wandb
 import torch
 import numpy as np
 import torch.nn.functional as F
@@ -13,6 +14,9 @@ from torch.utils.data import DataLoader
 from Network import Network
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
+from sklearn.metrics import confusion_matrix, classification_report
+import matplotlib.pyplot as plt
+import seaborn as sns
 from tqdm import tqdm
 
 class ContrastiveNetwork(Network):
@@ -24,11 +28,14 @@ class ContrastiveNetwork(Network):
         self.clear_neurons()
         return self.forward(image)
 
-    def clamped_phase(self, image, target):
+    def clamped_phase(self, image, target, target_spike=20):
         self.clear_neurons()
-        # Hard clamp example (unchanged):
-        clamped_hidden_activity = F.one_hot(target, num_classes=10).float() * self.T
+        one_hot_target = F.one_hot(target, num_classes=10).float() * target_spike
+        noise = torch.rand(10) * 0.0
+
+        clamped_hidden_activity =  one_hot_target + noise
         clamped_hidden_activity = clamped_hidden_activity.view(-1)
+
         return clamped_hidden_activity
 
     def contrastive_update(self, free_act, clamped_act):
@@ -36,14 +43,12 @@ class ContrastiveNetwork(Network):
         delta_w = self.lr * torch.outer(encoded_image, (clamped_act - free_act))
         self.synapse_input_hidden.w += delta_w
 
-        # Optional: weight normalization step
         #with torch.no_grad():
-            #max_norm = 2.0
-            #row_norms = torch.norm(self.synapse_input_hidden.w, dim=1)
-            # Clip each row if it exceeds max_norm
-            #for i, row_norm in enumerate(row_norms):
-            #    if row_norm > max_norm:
-            #        self.synapse_input_hidden.w[i, :] *= (max_norm / row_norm)
+        #    max_norm = 100.0
+        #    row_norms = torch.norm(self.synapse_input_hidden.w, dim=1, keepdim=True)
+        #    row_norms = torch.clamp(row_norms, min=1e-6)
+        #    scaling_factors = torch.clamp(max_norm / row_norms, max=1.0)
+        #    self.synapse_input_hidden.w *= scaling_factors
 
 def main():
     wandb.init(
@@ -51,10 +56,10 @@ def main():
             project="chl_training",
 
             # optional: give your run a short name
-            name="checking new config",
+            name="normalize_weights and soft clamp",
 
             # optional: add a description of the run
-            notes="checking biological params with no homeostasis and no weight normalization",
+            notes="checking biological params and weight normalization",
 
             # track hyperparameters and run metadata
             
@@ -63,6 +68,7 @@ def main():
                     'report_interval': 1000,
                     'num_epochs': 1,
                     'T':100,
+                    'input_size':784,
                     'hidden_size':10,
                     'tau':30,
                     'lr':0.005,
@@ -72,12 +78,13 @@ def main():
                     'V_rest':0.0,
                     'theta':0.5,
                     'refractory_period':5,
-                    'tau_theta':150,
-                    'theta_increment': 30,
                     'homeostasis': False,
+                    'tau_theta':150,
+                    'theta_increment': 100,
                     'device':'cpu'}
         )
     
+
     config = wandb.config
     
     epochs = config['num_epochs']
@@ -128,7 +135,8 @@ def main():
             net.contrastive_update(free_act, clamped_act)
 
             if idx % 10000 == 0:
-                print(f"Step {idx}: Free activity: {free_act}, Clamped activity: {clamped_act}")
+                print(f"Step {idx} label {label}: Free activity: {free_act}, Clamped activity: {clamped_act}")
+                print(f"theta: {net.hidden_layer.theta}")
                 print(f'Weights norm in {idx}:', torch.norm(net.synapse_input_hidden.w).item())
 
                 # --- Testing loop ---
@@ -173,3 +181,8 @@ def main():
 
     print("\nClassification Report:")
     print(classification_report(y_true, y_pred, labels=labels, zero_division=0))
+
+    wandb.finish()
+
+if __name__ == "__main__":
+    main()
