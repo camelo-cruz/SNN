@@ -14,7 +14,7 @@ class ReceptiveField:
         self.spiked = None
         self.encoded_image = None
 
-    def compute_potential(self, image, encoding='isi', time_steps=100):
+    def compute_potential(self, image, encoding='poisson', time_steps=100):
         self.time_steps = time_steps
         image = image.view(-1).to(self.device)  # Flatten the image to a vector (28*28)
         max_pixel = torch.max(image)
@@ -29,6 +29,10 @@ class ReceptiveField:
                     spike_times = torch.arange(0, self.time_steps, isi, device=self.device).long()
                     spike_times = spike_times[spike_times < self.time_steps]  # Ensure spike times are within bounds
                     self.encoded_image[i, spike_times] = 1
+        elif encoding == 'poisson':
+            for i, intensity in enumerate(self.normalized_image):
+                spike_times = torch.bernoulli(torch.full((self.time_steps,), intensity, device=self.device)).long()
+                self.encoded_image[i] = spike_times
     
     def fire(self, t):
         self.spiked = self.encoded_image[:, t]

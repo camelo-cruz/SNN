@@ -20,20 +20,25 @@ import seaborn as sns
 from tqdm import tqdm
 
 class ContrastiveNetwork(Network):
-    def __init__(self, lr, *args, **kwargs):
+    def __init__(self, lr, decay, spikes, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.decay = decay
         self.lr = lr
+        self.spikes = spikes
 
     def free_phase(self, image):
         self.clear_neurons()
-        return self.forward(image)
+        outs = self.forward(image)
+        self.max_spike = outs.max(dim=0)[0]
 
-    def clamped_phase(self, image, target, target_spike=20):
+        return outs
+
+    def clamped_phase(self, image, target):
         self.clear_neurons()
-        one_hot_target = F.one_hot(target, num_classes=10).float() * target_spike
-        noise = torch.rand(10) * 0.0
+        one_hot_target = F.one_hot(target, num_classes=10).float() * self.T * self.spikes
+        #noise = torch.randint(low=1, high=3, size=(10,))
 
-        clamped_hidden_activity =  one_hot_target + noise
+        clamped_hidden_activity =  one_hot_target
         clamped_hidden_activity = clamped_hidden_activity.view(-1)
 
         return clamped_hidden_activity
@@ -43,12 +48,7 @@ class ContrastiveNetwork(Network):
         delta_w = self.lr * torch.outer(encoded_image, (clamped_act - free_act))
         self.synapse_input_hidden.w += delta_w
 
-        #with torch.no_grad():
-        #    max_norm = 100.0
-        #    row_norms = torch.norm(self.synapse_input_hidden.w, dim=1, keepdim=True)
-        #    row_norms = torch.clamp(row_norms, min=1e-6)
-        #    scaling_factors = torch.clamp(max_norm / row_norms, max=1.0)
-        #    self.synapse_input_hidden.w *= scaling_factors
+        self.synapse_input_hidden.w *= (1.0 - self.decay)
 
 def main():
     wandb.init(
@@ -56,7 +56,7 @@ def main():
             project="chl_training",
 
             # optional: give your run a short name
-            name="normalize_weights and soft clamp",
+            name="new best config with slighter higer tau",
 
             # optional: add a description of the run
             notes="checking biological params and weight normalization",
@@ -66,21 +66,23 @@ def main():
             config={'num_train_data': 60000,
                     'num_test_data': 10000,
                     'report_interval': 1000,
-                    'num_epochs': 1,
-                    'T':100,
+                    'num_epochs': 2,
+                    'T':150,
                     'input_size':784,
                     'hidden_size':10,
                     'tau':30,
-                    'lr':0.005,
+                    'lr':0.0000006,
+                    'spikes' : 0.25,
+                    'decay': 0.0004,
                     'R':1.0,
-                    'scale':5,
-                    'dt':1,
+                    'scale':3.6,
+                    'dt':1.0,
                     'V_rest':0.0,
                     'theta':0.5,
                     'refractory_period':5,
                     'homeostasis': False,
-                    'tau_theta':150,
-                    'theta_increment': 100,
+                    'tau_theta':40,
+                    'theta_increment': 1.0,
                     'device':'cpu'}
         )
     
@@ -100,10 +102,12 @@ def main():
     train_loader = DataLoader(train_dataset, batch_size=1, shuffle=True)
     
     test_dataset = datasets.MNIST(root='./data', train=False, transform=transform, download=True)
-    test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False)
+    test_loader = DataLoader(test_dataset, batch_size=1, shuffle=True)
 
     net = ContrastiveNetwork(
         lr=config['lr'],         # (1) learning rate (dimensionless)
+        decay=config['decay'],     # (2) weight decay (dimensionless)
+        spikes=config['spikes'],   # (3) number of spikes (dimensionless)
         T=config['T'],            # (2) total simulation timesteps
         input_size=config['input_size'],   # (3) input dimensionality (MNIST)
         hidden_size=config['hidden_size'],   # (4) hidden layer size
@@ -117,7 +121,7 @@ def main():
         theta_increment=config['theta_increment'],  # (12) increment for theta (normalized)
         refractory_period=config['refractory_period'],  # (11) refractory period (ms)
     )
-    net.homeostasis = config['homeostasis']
+    
 
     print(f"Network initialized with parameters: {net}", flush=True)
 
@@ -127,6 +131,7 @@ def main():
     for epoch in range(config['num_epochs']):
         print(f"Epoch {epoch+1}/{epochs}")
         for idx, (image, label) in enumerate(tqdm(train_loader, desc=f"Training for epoch {epoch+1}")):
+            net.homeostasis = config['homeostasis']
             if idx >= num_train_samples:
                 break
 
@@ -135,8 +140,10 @@ def main():
             net.contrastive_update(free_act, clamped_act)
 
             if idx % 10000 == 0:
+                net.homeostasis = False
                 print(f"Step {idx} label {label}: Free activity: {free_act}, Clamped activity: {clamped_act}")
                 print(f"theta: {net.hidden_layer.theta}")
+                print(f"weights: {net.synapse_input_hidden.w}")
                 print(f'Weights norm in {idx}:', torch.norm(net.synapse_input_hidden.w).item())
 
                 # --- Testing loop ---
@@ -146,7 +153,6 @@ def main():
                 total = 0
 
                 for idx, (image, label) in enumerate(tqdm(test_loader, desc=f"Testing {idx}")):
-
                     outs = net.forward(image)
                     # For batch size 1 with output shape [num_classes], use dim=0.
                     predicted_index = torch.argmax(outs, dim=0)
@@ -163,6 +169,35 @@ def main():
                 accuracy = correct / total
                 wandb.log({'accuracy': accuracy})
                 print(f"Current Accuracy: {accuracy:.2%}", flush=True)
+    
+    # --- Testing loop ---
+    net.homeostasis = False
+    print(f"Step {idx} label {label}: Free activity: {free_act}, Clamped activity: {clamped_act}")
+    print(f"theta: {net.hidden_layer.theta}")
+    print(f"weights: {net.synapse_input_hidden.w}")
+    print(f'Weights norm in {idx}:', torch.norm(net.synapse_input_hidden.w).item())
+    y_true = []
+    y_pred = []
+    correct = 0
+    total = 0
+    for idx, (image, label) in enumerate(tqdm(test_loader, desc=f"Testing {idx}")):
+
+        outs = net.forward(image)
+        # For batch size 1 with output shape [num_classes], use dim=0.
+        predicted_index = torch.argmax(outs, dim=0)
+        predicted = predicted_index.item()
+        label_val = label.item()
+
+        y_true.append(label_val)
+        y_pred.append(predicted)
+
+        if predicted == label_val:
+            correct += 1
+        total += 1
+
+    accuracy = correct / total
+    wandb.log({'accuracy': accuracy})
+    print(f"Final Accuracy: {accuracy:.2%}", flush=True)
     
     # Generate and display the confusion matrix.
     labels = sorted(torch.unique(torch.tensor(train_loader.dataset.targets)).tolist())

@@ -113,13 +113,11 @@ class Network:
     @stdp.setter
     def stdp(self, value):
         self._stdp = value
-        print(f"stdp activated: {value}")
     
     @homeostasis.setter
     def homeostasis(self, value):
         self._homeostasis = value
         self.hidden_layer.homeostasis = value
-        print(f"Homeostasis activated: {self.hidden_layer.homeostasis}")
 
     def __repr__(self):
         return (
@@ -127,8 +125,8 @@ class Network:
             f"scale={self.scale}, dt={self.dt}, V_rest={self.V_rest}, theta={self.theta}, "
             f"refrac={self.refractory_period}, tau_theta={self.tau_theta}, theta_increment={self.theta_increment}, "
             f"A_plus={self.A_plus}, A_minus={self.A_minus}, tau_stdp={self.tau_stdp}, "
-            f"max_w={self.max_w}, min_w={self.min_w}, record_history={self.record_history}, device='{self.device}')"
-            f"stdp={self.stdp}, homeostasis={self.homeostasis}"
+            f"max_w={self.max_w}, min_w={self.min_w}, record_history={self.record_history}, device='{self.device}'"
+            f"stdp={self.stdp}, homeostasis={self.homeostasis})"
         )
 
     def clear_neurons(self):
