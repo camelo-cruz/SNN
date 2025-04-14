@@ -12,7 +12,7 @@ class Synapse:
     The synapse maintains a weight matrix that is updated according to a spike-timing dependent plasticity (STDP)
     rule. It also implements a simple delay mechanism using a queue for spike transmission.
     """
-    def __init__(self, pre_neuron, post_neuron, max_w, min_w, A_plus, A_minus, tau_stdp, device, record_history=False):
+    def __init__(self, pre_neuron, post_neuron, w=None, max_w=255, min_w=0, A_plus=0.005, A_minus=0.005, tau_stdp=40, device='cpu', record_history=False):
         """
         Initialize the synapse with specified STDP parameters.
         
@@ -38,12 +38,8 @@ class Synapse:
         self.device = device
         self.record_history = record_history
 
-        self.w = torch.normal(
-            mean=0.0,
-            std=0.1,
-            size=(pre_neuron.batch_size, post_neuron.batch_size),
-            device=device
-        )
+
+        self.w = w
         print(f"Initialized synaptic weights: {self.w}", flush=True)
 
         # Record initial weight if history recording is enabled.

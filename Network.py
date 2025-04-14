@@ -12,13 +12,13 @@ from torch.utils.data import DataLoader
 class Network:
     """
     A spiking neural network composed of an input layer (modeled as a ReceptiveField),
-    a hidden layer (modeled as a group of CurrentLIF neurons), and synapses connecting
+    a output layer (modeled as a group of CurrentLIF neurons), and synapses connecting
     the two layers that update via spike-timing dependent plasticity (STDP).
     """
     def __init__(self,
                  T=10,
                  input_size=28 * 28,
-                 hidden_size=100,
+                 output_size=100,
                  tau=100,
                  R=1,
                  scale=1,
@@ -43,7 +43,7 @@ class Network:
         Args:
             T (int): Number of time steps per forward pass.
             input_size (int): Size of the input (number of pixels).
-            hidden_size (int): Number of hidden neurons.
+            output_size (int): Number of output neurons.
             tau (int): Membrane time constant.
             R (int/float): Membrane resistance.
             scale (int/float): Scale factor for input current.
@@ -65,7 +65,7 @@ class Network:
         print(f"Network device selected: {device}")
         self.T = T
         self.input_size = input_size
-        self.hidden_size = hidden_size
+        self.output_size = output_size
         self.tau = tau
         self.R = R
         self.scale = scale
@@ -117,11 +117,11 @@ class Network:
     @homeostasis.setter
     def homeostasis(self, value):
         self._homeostasis = value
-        self.hidden_layer.homeostasis = value
+        self.output_layer.homeostasis = value
 
     def __repr__(self):
         return (
-            f"Network(T={self.T}, hidden_size={self.hidden_size}, tau={self.tau}, R={self.R}, "
+            f"Network(T={self.T}, output_size={self.output_size}, tau={self.tau}, R={self.R}, "
             f"scale={self.scale}, dt={self.dt}, V_rest={self.V_rest}, theta={self.theta}, "
             f"refrac={self.refractory_period}, tau_theta={self.tau_theta}, theta_increment={self.theta_increment}, "
             f"A_plus={self.A_plus}, A_minus={self.A_minus}, tau_stdp={self.tau_stdp}, "
@@ -133,16 +133,16 @@ class Network:
         """
         Reset the internal state of all neurons and clear recorded histories if any.
         """
-        self.hidden_layer.reset()
+        self.output_layer.reset()
         if self.record_history:
-            self.hidden_layer.V_history.clear()
-            self.hidden_layer.theta_history.clear()
-            self.synapse_input_hidden.w_history.clear()
+            self.output_layer.V_history.clear()
+            self.output_layer.theta_history.clear()
+            self.synapse_input_output.w_history.clear()
 
     def create_neurons(self):
         """
-        Initialize the input and hidden layers.
-        The input layer is modeled as a ReceptiveField, and the hidden layer consists 
+        Initialize the input and output layers.
+        The input layer is modeled as a ReceptiveField, and the output layer consists 
         of CurrentLIF neurons.
         """
         self.input_layer = ReceptiveField(
@@ -151,7 +151,7 @@ class Network:
             device=self.device  # Use the provided device
         )
 
-        self.hidden_layer = CurrentLIF(
+        self.output_layer = CurrentLIF(
             V_rest=self.V_rest,
             scale=self.scale,
             theta=self.theta,
@@ -159,17 +159,17 @@ class Network:
             tau_theta=self.tau_theta,
             theta_increment=self.theta_increment,
             record_history=self.record_history,
-            batch_size=self.hidden_size,
+            batch_size=self.output_size,
             device=self.device
         )
 
     def create_synapses(self):
         """
-        Create synapses connecting the input layer to the hidden layer.
+        Create synapses connecting the input layer to the output layer.
         """
-        self.synapse_input_hidden = Synapse(
+        self.synapse_input_output = Synapse(
             pre_neuron=self.input_layer,
-            post_neuron=self.hidden_layer,
+            post_neuron=self.output_layer,
             A_plus=self.A_plus,
             A_minus=self.A_minus,
             tau_stdp=self.tau_stdp,
@@ -183,29 +183,29 @@ class Network:
         """
         Process an input image and propagate it through the network.
 
-        The input is first encoded and processed by the input layer. Then, the hidden layer
+        The input is first encoded and processed by the input layer. Then, the output layer
         receives transmitted spikes via the synapses. The STDP updates are applied if learning is enabled.
         
         Args:
             image (torch.Tensor): The input image tensor.
         
         Returns:
-            torch.Tensor: The cumulative spike count for the hidden neurons.
+            torch.Tensor: The cumulative spike count for the output neurons.
         """
         # Encode input image into potential over T time steps.
         self.input_layer.compute_potential(image, encoding='isi', time_steps=self.T)
-        count_spikes = torch.zeros(self.hidden_size, device=self.device)
+        count_spikes = torch.zeros(self.output_size, device=self.device)
 
         # Process T time steps.
         for t in range(self.T):
             self.input_layer.fire(t)  # Generate spikes in the input layer.
-            self.synapse_input_hidden.transmit()  # Transmit spikes to hidden neurons.
-            self.hidden_layer.update()            # Update hidden neuron states.
-            count_spikes += self.hidden_layer.spiked  # Accumulate spikes.
+            self.synapse_input_output.transmit()  # Transmit spikes to output neurons.
+            self.output_layer.update()            # Update output neuron states.
+            count_spikes += self.output_layer.spiked  # Accumulate spikes.
 
             # Apply STDP updates if learning is enabled.
             if self.stdp:
-                self.synapse_input_hidden.update_stdp()
+                self.synapse_input_output.update_stdp()
 
         if self.plot:
             self.plot_activity()
@@ -217,28 +217,28 @@ class Network:
         """
         Plot the evolution of the synaptic weights and neuronal spike activity.
         """
-        self.synapse_input_hidden.plot('input-hidden synapse')
+        self.synapse_input_output.plot('input-output synapse')
 
 
 def network_simulation():
     """
-    Run a simple network simulation with a two-pixel input and two hidden neurons.
+    Run a simple network simulation with a two-pixel input and two output neurons.
 
     An input image is provided to the network and spiking activity is propagated.
-    After processing, the spike counts of the hidden neurons and their final thresholds are printed.
+    After processing, the spike counts of the output neurons and their final thresholds are printed.
     """
     T = 10
     # For simplicity, we use a small tensor for the image.
     image = torch.tensor([[255, 255]], dtype=torch.float32)
 
-    # Initialize network with a small input and hidden layer for demonstration.
-    net = Network(T=T, input_size=2, hidden_size=2, scale=1, plot=True, device='cpu')
+    # Initialize network with a small input and output layer for demonstration.
+    net = Network(T=T, input_size=2, output_size=2, scale=1, plot=True, device='cpu')
     net.homeostasis = True
     net.stdp = True
 
     outputs = net.forward(image)
     print("Output Spike Counts:", outputs)
-    print("Final Theta Values:", net.hidden_layer.theta)
+    print("Final Theta Values:", net.output_layer.theta)
 
 
 if __name__ == '__main__':
