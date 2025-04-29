@@ -133,12 +133,12 @@ class ContrastiveNetwork:
             print(f"Feedforward synapse {i} weight norm: {torch.norm(synapse.w).item()}", flush=True)
         
         self.feedback_synapses = []
-        if self.L > 2:
-            for i in range(2, self.L):
-                feedback_w = self.W[i-1].t()
+        if len(self.layers) > 2:
+            for i in range(1, len(self.layers)-1):
+                feedback_w = self.W[i].t()
                 synapse = Synapse(
-                    pre_neuron=self.layers[i],
-                    post_neuron=self.layers[i-1],
+                    pre_neuron=self.layers[i+1],
+                    post_neuron=self.layers[i],
                     w=feedback_w
                 )
                 self.feedback_synapses.append(synapse)
@@ -163,7 +163,7 @@ class ContrastiveNetwork:
                 synapse.transmit()
             # Feedback pass.
             for synapse in self.feedback_synapses:
-                synapse.transmit()
+                synapse.transmit(scale=self.gamma)
             # Update each layer (except input) and accumulate spiking activity.
             for i, layer in enumerate(self.layers[1:], start=1):
                 layer.update()
@@ -179,39 +179,41 @@ class ContrastiveNetwork:
         """
         # Keep the one-hot tensor shape as (batch_size, num_classes)
         one_hot_target = F.one_hot(target, num_classes=self.layer_sizes[-1]).int().view(-1)  # shape: (bs, num_classes)
-        
         # Compute the input potential.
         self.input_layer.compute_potential(image, encoding='isi', time_steps=self.T)
+        # Precompute deterministic spike times for each sample in the batch
         bs = image.shape[0]
-        
-        # Compute the input layer activity.
+        num_classes = self.layer_sizes[-1]
+
         x0 = self.input_layer.encoded_image.sum(dim=1).view(bs, -1).int()
         x_clamped = [x0]
-
-        # Initialize the activity for subsequent layers.
         for layer in self.layers[1:]:
             x_clamped.append(torch.zeros((bs, layer.batch_size), dtype=torch.int32, device=self.device))
-        
-        # Process T time steps, updating only the hidden layers.
+
+        one_hot_target = F.one_hot(target, num_classes=10).int().view(-1)  # shape: (bs, num_classes)
+
+
+        # Process T time steps
         for t in range(self.T):
             self.input_layer.fire(t)
-            scaled_target = torch.bernoulli(one_hot_target.float() * self.spikes).int()
-            self.layers[-1].spiked = scaled_target
-            x_clamped[-1] += self.layers[-1].spiked
 
+            output_spikes = torch.bernoulli(one_hot_target * self.spikes)
+            self.layers[-1].spiked = output_spikes.bool()
+            x_clamped[-1] += output_spikes.int()
+            
             for synapse in self.feedforward_synapses:
                 synapse.transmit()
+
             for synapse in self.feedback_synapses:
-                synapse.transmit()
-                
-            # Update only the hidden layers (skip input and output).
+                synapse.transmit(scale=self.gamma)
+
             for i, layer in enumerate(self.layers[1:-1], start=1):
                 layer.update()
                 x_clamped[i] += layer.spiked
+
                 
         self.clear_neurons()
         return x_clamped
-
 
 
     def contrastive_update(self, x_free, x_clamped):
@@ -225,7 +227,6 @@ class ContrastiveNetwork:
         for i, synapse in enumerate(self.feedforward_synapses):
             synapse.w = self.W[i]
         for i, synapse in enumerate(self.feedback_synapses):
-            # Feedback synapse from layer i+1 to i uses the transpose of the corresponding feedforward weight.
             synapse.w = self.W[i+1].t()
 
 #--- Import data ---
@@ -240,18 +241,18 @@ train_loader = DataLoader(train_dataset, batch_size=1, shuffle=True)
 test_dataset = datasets.MNIST(root='./data', train=False, transform=transform, download=True)
 test_loader = DataLoader(test_dataset, batch_size=1, shuffle=True)
 
+
 def simulation():
     net = ContrastiveNetwork(
         lr=0.0000006,
         gamma=0.1,
         decay=0.0004,
-        spikes=0.10,
-        T=50,
-        input_size=784,
-        hidden_size=[100, 10],
+        spikes=1.0,
+        T=100,
+        layer_sizes=[784, 100, 10],
         tau=30,
         R=1.0,
-        scale=3.6,
+        scale=5,
         dt=1.0,
         V_rest=0.0,
         theta=0.5,
@@ -262,13 +263,12 @@ def simulation():
     for idx, (image, label) in enumerate(tqdm(train_loader, desc="Training")):
         if idx >= 2:
             break
-        # Free phase
+        
         free_act = net.free_phase(image)
-        # Clamped phase
         clamped_act = net.clamped_phase(image, label)
-        # Contrastive update
-        net.contrastive_update(free_act, clamped_act)
-        print(f"label {label}: Free activity: {free_act}, Clamped activity: {clamped_act}")
+
+        for i, layer in enumerate(net.layers):
+            print(f"Step {idx} label {label} layer {i}: Free : {free_act[i]}, Clamped activity: {clamped_act[i]}")
 
 def train(network, train_loader, num_train_samples, epochs, test_loader = None, num_test_samples = None):
     for epoch in range(epochs):
@@ -330,13 +330,13 @@ def main():
             config={'num_train_data': 60000,
                     'num_test_data': 10000,
                     'report_interval': 1000,
-                    'num_epochs': 2,
-                    'T':50,
+                    'num_epochs': 1,
+                    'T':100,
                     'layer_sizes':[784, 10],
                     'tau':30,
                     'lr':0.01,
-                    'gamma':0.1,
-                    'spikes' : 1.0,
+                    'gamma':1,
+                    'spikes' : 0.2,
                     'decay': 0.0004,
                     'R':1.0,
                     'scale':3.6,
@@ -373,7 +373,7 @@ def main():
 
     print(f"Network initialized with parameters: {net}", flush=True)
     
-    train(net, train_loader, num_train_samples=num_train_samples, epochs=epochs, test_loader=test_loader, num_test_samples=100)
+    train(net, train_loader, num_train_samples=num_train_samples, epochs=epochs, test_loader=test_loader, num_test_samples=4000)
     results = test(net, test_loader, num_test_samples=num_test_samples)
     accuracy = results['accuracy']
     y_true = results['y_true']
@@ -401,6 +401,7 @@ def main():
     print(classification_report(y_true, y_pred, labels=labels, zero_division=0))
 
     wandb.finish()
+
 
 if __name__ == "__main__":
     main()
